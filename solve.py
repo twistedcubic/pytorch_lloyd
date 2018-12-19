@@ -3,8 +3,9 @@ import torch
 import random
 import sys
 
-num_centers = 1024
-chunk_size = 16384
+num_centers = 16384
+chunk_size = 32768
+num_iterations = 10
 
 device = torch.device('cuda')
 
@@ -30,7 +31,7 @@ if __name__ == '__main__':
     if num_points % chunk_size != 0:
         all_ones_last = torch.ones(num_points % chunk_size, dtype=torch.float).to(device)
     all_ones_cnt = torch.ones(num_centers, dtype=torch.float).to(device)
-    while True:
+    for it in range(num_iterations):
         centers_norms = torch.sum(centers ** 2, dim=0).view(1, -1)
         new_centers.fill_(0.0)
         cnt.fill_(0.0)
@@ -40,7 +41,7 @@ if __name__ == '__main__':
             dataset_piece = dataset[begin:end, :]
             dataset_norms = torch.sum(dataset_piece ** 2, dim=1).view(-1, 1)
             distances = torch.mm(dataset_piece, centers)
-            distances *= -2
+            distances *= -2.0
             distances += dataset_norms
             distances += centers_norms
             _, min_ind = torch.min(distances, dim=1)
@@ -49,10 +50,7 @@ if __name__ == '__main__':
                 cnt.scatter_add_(0, min_ind, all_ones)
             else:
                 cnt.scatter_add_(0, min_ind, all_ones_last)
-        sorted_cnt = torch.sort(cnt)[0]
-        for i in range(num_centers):
-            sys.stdout.write('%d ' % sorted_cnt[i])
-        sys.stdout.write('\n==========\n')
         cnt = torch.where(cnt > 1e-3, cnt, all_ones_cnt)
         new_centers /= cnt.view(-1, 1)
         centers = torch.transpose(new_centers, 0, 1).clone()
+        print('Iteration %d is done' % it)
