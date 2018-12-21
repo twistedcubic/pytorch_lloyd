@@ -7,14 +7,48 @@ num_centers = 65536
 chunk_size = 8192
 num_iterations = 20
 k = 10
-
 device = torch.device('cuda')
 device_cpu = torch.device('cpu')
 
+def eval_kmeans(queries, centers, centers_norms, codes ):
+    queries_norms = torch.sum(queries ** 2, dim=1).view(-1, 1)
+    distances = torch.mm(queries, centers)
+    distances *= -2.0
+    distances += queries_norms
+    distances += centers_norms
+    codes = codes.to(device_cpu)
+    cnt = torch.zeros(num_centers, dtype=torch.long)
+    bins = [[]] * num_centers
+    for i in range(num_points):
+        cnt[codes[i]] += 1
+        bins[codes[i]].append(i)
+    num_queries = answers.size()[0]
+    for num_probes in range(1, num_centers + 1):
+        _, probes = torch.topk(distances, num_probes, dim=1, largest=False)
+        probes = probes.to(device_cpu)
+        total_score = 0
+        total_candidates = 0
+        for i in range(num_queries):
+            candidates = []
+            tmp = set()
+            for j in range(num_probes):
+                candidates.append(cnt[probes[i, j]])
+                tmp.add(int(probes[i, j]))
+            overall_candidates = sum(candidates)
+            score = 0
+            for j in range(k):
+                if int(codes[answers[i, j]]) in tmp:
+                    score += 1
+            total_score += score
+            total_candidates += overall_candidates 
+        print(num_probes, float(total_score) / float(k * num_queries), float(total_candidates) / float(num_queries))
+
 if __name__ == '__main__':
+    
     dataset_numpy = np.load('dataset.npy')
     queries_numpy = np.load('queries.npy')
     answers_numpy = np.load('answers.npy')
+    
     dataset = torch.from_numpy(dataset_numpy).to(device)
     queries = torch.from_numpy(queries_numpy).to(device)
     answers = torch.from_numpy(answers_numpy)
@@ -64,34 +98,4 @@ if __name__ == '__main__':
         cnt = torch.where(cnt > 1e-3, cnt, all_ones_cnt)
         new_centers /= cnt.view(-1, 1)
         centers = torch.transpose(new_centers, 0, 1).clone()
-    queries_norms = torch.sum(queries ** 2, dim=1).view(-1, 1)
-    distances = torch.mm(queries, centers)
-    distances *= -2.0
-    distances += queries_norms
-    distances += centers_norms
-    codes = codes.to(device_cpu)
-    cnt = torch.zeros(num_centers, dtype=torch.long)
-    bins = [[]] * num_centers
-    for i in range(num_points):
-        cnt[codes[i]] += 1
-        bins[codes[i]].append(i)
-    num_queries = answers.size()[0]
-    for num_probes in range(1, num_centers + 1):
-        _, probes = torch.topk(distances, num_probes, dim=1, largest=False)
-        probes = probes.to(device_cpu)
-        total_score = 0
-        total_candidates = 0
-        for i in range(num_queries):
-            candidates = []
-            tmp = set()
-            for j in range(num_probes):
-                candidates.append(cnt[probes[i, j]])
-                tmp.add(int(probes[i, j]))
-            overall_candidates = sum(candidates)
-            score = 0
-            for j in range(k):
-                if int(codes[answers[i, j]]) in tmp:
-                    score += 1
-            total_score += score
-            total_candidates += overall_candidates 
-        print(num_probes, float(total_score) / float(k * num_queries), float(total_candidates) / float(num_queries))
+    eval_kmeans(queries, centers, centers_norms, codes)
